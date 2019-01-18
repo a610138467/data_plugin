@@ -17,6 +17,10 @@ void data_plugin::set_program_options(options_description& cli, options_descript
         ("data-plugin-struct",    bpo::value<vector<string> >()->composing(), "which struct will be record, can have more than one")
         ("data-plugin-producer",  bpo::value<vector<string> >()->composing(), "which producer will be used, can have more than one")
         ("data-plugin-prefix",    bpo::value<string>()->default_value("eosio"),"the prefix of all data struct name")
+        ("data-plugin-register-accepted-block", bpo::value<bool>()->default_value(true), "if register callback on accepted block")
+        ("data-plugin-register-irreversible-block", bpo::value<bool>()->default_value(true), "if register callback on irreversible block")
+        ("data-plugin-register-applied-transaction", bpo::value<bool>()->default_value(true), "if register callback on applied transaction")
+        ("data-plugin-register-accepted-transaction", bpo::value<bool>()->default_value(true), "if register callback on accepted transaction")
         ;
 }
 
@@ -27,29 +31,6 @@ void callback(const vector<string>& types, const vector<string>& producers, cons
     fc::mutable_variant_object tobject = tvariant.get_object();
     if (irreversible)
         tobject.set("irreversible", *irreversible);
-    if (tobject.find("action_traces") != tobject.end()) {
-        vector<fc::variant> action_traces_vector;
-        queue<fc::variant> todo_action_traces;
-        for (auto trace : tobject["action_traces"].get_array()) {
-            fc::mutable_variant_object traceobj(trace);
-            traceobj.set("index_in_transaction", static_cast<uint32_t>(action_traces_vector.size()));
-            action_traces_vector.push_back(traceobj);
-            if (!trace.get_object()["inline_traces"].get_array().empty())
-                todo_action_traces.push(trace);
-        }
-        while (!todo_action_traces.empty()) {
-            auto trace = todo_action_traces.front();
-            todo_action_traces.pop();
-            for (auto itrace : trace.get_object()["inline_traces"].get_array()) {
-                fc::mutable_variant_object traceobj(trace);
-                traceobj.set("index_in_transaction", static_cast<uint32_t>(action_traces_vector.size()));
-                action_traces_vector.push_back(traceobj);
-                if (!itrace.get_object()["inline_traces"].get_array().empty())
-                    todo_action_traces.push(itrace);
-            }
-        }
-        tobject.set("total_action_traces", std::move(action_traces_vector));
-    }
     for (string tname : types) {
         auto type = eosio::data::types().find_type(tname);
         if (!type) continue;
@@ -104,61 +85,69 @@ void data_plugin::plugin_initialize(const variables_map& options) {
     }
 
     auto& chain = app().get_plugin<chain_plugin>().chain();
-    on_accepted_block_connection = chain.accepted_block.connect([=](const block_state_ptr& block_state) {
-        if (current_block_num < start_block_num) return;
-        try{
-            callback(types, producers, block_state, false);
-        } catch (const std::exception& ex) {
-            elog ("std Exception in data_plugin when accept block : ${ex}", ("ex", ex.what()));
-        } catch ( fc::exception& ex) {
-            wlog( "fc Exception in data_plugin when accept block : ${ex}", ("ex", ex.to_detail_string()) );
-        } catch (...) {
-            elog ("Unknown Exception in data_plugin when accept block");
-        }
-    });
-    on_irreversible_block_connection = chain.irreversible_block.connect([=](const block_state_ptr& block_state) {
-        current_block_num = block_state->block_num;
-        if (current_block_num < start_block_num) return;
-        try {
-            callback(types, producers, block_state, true);
-        } catch (const std::exception& ex) {
-            elog ("std Exception in data_plugin when irreversible block : ${ex}", ("ex", ex.what()));
-        } catch ( fc::exception& ex) {
-            wlog( "fc Exception in data_plugin when irreversible block : ${ex}", ("ex", ex.to_detail_string()) );
-        } catch (...) {
-            elog ("Unknown Exception in data_plugin when irreversible block");
-        }
-        ilog ("data_plug, current irreversible block_id : ${current_block_num}", ("current_block_num", current_block_num));
-        if (stop_block_num > start_block_num && current_block_num >= stop_block_num) {
-            ilog ("data plugin stopped. [${from}-${to}]", ("from", start_block_num)("to", stop_block_num));
-            plugin_shutdown();
-            //app().quit();
-        }
-    });
-    on_applied_transaction_connection = chain.applied_transaction.connect([=](const transaction_trace_ptr& transaction_trace) {
-        if (current_block_num < start_block_num) return;
-        try {
-            callback(types, producers, transaction_trace);
-        } catch (const std::exception& ex) {
-            elog ("std Exception in data_plugin when applied transaction : ${ex}", ("ex", ex.what()));
-        } catch ( fc::exception& ex) {
-            wlog( "fc Exception in data_plugin when applied transaction : ${ex}", ("ex", ex.to_detail_string()) );
-        } catch (...) {
-            elog ("Unknown Exception in data_plugin when applied transaction");
-        }
-    });
-    on_accepted_transaction_connection = chain.accepted_transaction.connect([=](const transaction_metadata_ptr& transaction_metadata) {
-        if (current_block_num < start_block_num) return;
-        try {
-            callback(types, producers, transaction_metadata);
-        } catch (const std::exception& ex) {
-            elog ("std Exception in data_plugin when accepted transaction : ${ex}", ("ex", ex.what()));
-        } catch ( fc::exception& ex) {
-            wlog( "fc Exception in data_plugin when accepted transaction : ${ex}", ("ex", ex.to_detail_string()) );
-        } catch (...) {
-            elog ("Unknown Exception in data_plugin when accepted transaction");
-        }
-    });
+    if (options.at("data-plugin-register-accepted-block").as<bool>()) {
+        on_accepted_block_connection = chain.accepted_block.connect([=](const block_state_ptr& block_state) {
+            if (current_block_num < start_block_num) return;
+            try{
+                callback(types, producers, block_state, false);
+            } catch (const std::exception& ex) {
+                elog ("std Exception in data_plugin when accept block : ${ex}", ("ex", ex.what()));
+            } catch ( fc::exception& ex) {
+                wlog( "fc Exception in data_plugin when accept block : ${ex}", ("ex", ex.to_detail_string()) );
+            } catch (...) {
+                elog ("Unknown Exception in data_plugin when accept block");
+            }
+        });
+    }
+    if (options.at("data-plugin-register-irreversible-block").as<bool>()) {
+        on_irreversible_block_connection = chain.irreversible_block.connect([=](const block_state_ptr& block_state) {
+            current_block_num = block_state->block_num;
+            if (current_block_num < start_block_num) return;
+            try {
+                callback(types, producers, block_state, true);
+            } catch (const std::exception& ex) {
+                elog ("std Exception in data_plugin when irreversible block : ${ex}", ("ex", ex.what()));
+            } catch ( fc::exception& ex) {
+                wlog( "fc Exception in data_plugin when irreversible block : ${ex}", ("ex", ex.to_detail_string()) );
+            } catch (...) {
+                elog ("Unknown Exception in data_plugin when irreversible block");
+            }
+            ilog ("data_plug, current irreversible block_id : ${current_block_num}", ("current_block_num", current_block_num));
+            if (stop_block_num > start_block_num && current_block_num >= stop_block_num) {
+                ilog ("data plugin stopped. [${from}-${to}]", ("from", start_block_num)("to", stop_block_num));
+                plugin_shutdown();
+                app().quit();
+            }
+        });
+    }
+    if (options.at("data-plugin-register-applied-transaction").as<bool>()) {
+        on_applied_transaction_connection = chain.applied_transaction.connect([=](const transaction_trace_ptr& transaction_trace) {
+            if (current_block_num < start_block_num) return;
+            try {
+                callback(types, producers, transaction_trace);
+            } catch (const std::exception& ex) {
+                elog ("std Exception in data_plugin when applied transaction : ${ex}", ("ex", ex.what()));
+            } catch ( fc::exception& ex) {
+                wlog( "fc Exception in data_plugin when applied transaction : ${ex}", ("ex", ex.to_detail_string()) );
+            } catch (...) {
+                elog ("Unknown Exception in data_plugin when applied transaction");
+            }
+       });
+    }
+    if (options.at("data-plugin-register-accepted-transaction").as<bool>()) {
+        on_accepted_transaction_connection = chain.accepted_transaction.connect([=](const transaction_metadata_ptr& transaction_metadata) {
+            if (current_block_num < start_block_num) return;
+            try {
+                callback(types, producers, transaction_metadata);
+            } catch (const std::exception& ex) {
+                elog ("std Exception in data_plugin when accepted transaction : ${ex}", ("ex", ex.what()));
+            } catch ( fc::exception& ex) {
+                wlog( "fc Exception in data_plugin when accepted transaction : ${ex}", ("ex", ex.to_detail_string()) );
+            } catch (...) {
+                elog ("Unknown Exception in data_plugin when accepted transaction");
+            }
+        });
+    }
 }
 
 void data_plugin::plugin_startup() {

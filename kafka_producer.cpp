@@ -16,12 +16,13 @@ struct KafkaProducer : producer<KafkaProducer> {
             ("data-plugin-kafka-addr", bpo::value<vector<string> >()->composing(), "the addr of kafka endpoint, can have more than one")
             ("data-plugin-kafka-message-max-bytes", bpo::value<uint32_t>()->default_value(2000000), "the maximum bytes of one message")
             ("data-plugin-print-payload", bpo::value<bool>()->default_value(false), "if true if will print the payload with dlog")
-            ("data-plugin-kafka-partition-num", bpo::value<uint32_t>()->default_value(1), "total partition num")
+            ("data-plugin-kafka-partition-num", bpo::value<uint32_t>()->default_value(false), "total partition num")
         ;
     }
     void initialize(const variables_map& options) {
-        if (options.count("data-plugin-kafka-addr") <= 0) return;
-        vector<string> addrs = options["data-plugin-kafka-addr"].as<vector<string> >(); 
+        vector<string> addrs;
+        if (options.count("data-plugin-kafka-addr") > 0)
+            addrs = options["data-plugin-kafka-addr"].as<vector<string> >(); 
         if (addrs.empty()) return;
         initialized = true;
         kafka_config = {
@@ -48,7 +49,7 @@ struct KafkaProducer : producer<KafkaProducer> {
                 ilog ("kafka producer flush finish");
                 kafka_producer.reset();
             } catch (const std::exception& ex) {
-                elog ("std Exception when close kafka producer : ${ex} try again(${i}/5", ("ex", ex.what())("i", i));
+                elog ("std Exception when close kafka producer : ${ex} try again(${i}/5)", ("ex", ex.what())("i", i));
             }
         }
     }
