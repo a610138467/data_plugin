@@ -139,107 +139,41 @@ struct Action : type<Action> {
                 }
             }
         }
+        //基本信息
+        auto block_time = obj["block_time"].as<string>();
+        auto block_num  = ttp->block_num;
+        auto trx_id = string(ttp->id);
+        //计算分表策略
+        fc::optional<string> table_suffix;
+        size_t replace_pos = block_time.find("-");
+        while (replace_pos != string::npos) {
+            block_time.replace(replace_pos, 1, "");
+            replace_pos = block_time.find("-");
+        }
+        size_t pos = block_time.find('T');
+        table_suffix = block_time.substr(0, pos - 2);
+
         for (auto var : action_traces_vector) {
             auto trace = var.get_object();
             auto resobj = fc::mutable_variant_object
-                ("transaction_id_askey", trace["trx_id"])
+                ("transaction_id", trace["trx_id"])
                 ("block_time", ttp->block_time)
-                ("global_sequence", trace["receipt"].get_object()["global_sequence"])
+                ("block_num", ttp->block_num)
+                ("table_suffix", table_suffix)
                 ("account_askey", trace["act"].get_object()["account"])
                 ("name_askey", trace["act"].get_object()["name"])
                 ("receiver_askey", trace["receipt"].get_object()["receiver"])
-                ("parent_global_sequence", trace["parent_global_sequence"])
                 ("authorization", fc::json::to_string(trace["act"].get_object()["authorization"], fc::json::legacy_generator))
+                ("data", fc::json::to_string(trace["act"].get_object()["data"]))
             ;
-            string account = string(trace["act"].get_object()["account"].as<account_name>());
-            string name = string(trace["act"].get_object()["name"].as<account_name>());
-            if (account == "eosio.token" && name == "transfer") {
-                auto data = trace["act"].get_object()["data"].get_object();
-                resobj.set("string_param1", data["from"]);
-                resobj.set("string_param2", data["to"]);
-                resobj.set("string_param3", data["memo"]);
-                auto quantity = data["quantity"].as<asset>();
-                resobj.set("string_param4", quantity.symbol_name());
-                resobj.set("number_param1", quantity.to_real());
-            } else if (account == "eosio.token" && name == "create") {
-                auto data = trace["act"].get_object()["data"].get_object();
-                resobj.set("string_param1", data["issuer"]);
-                auto maximum_supply = data["maximum_supply"].as<asset>();
-                resobj.set("string_param2", maximum_supply.symbol_name());
-                resobj.set("number_param1", maximum_supply.to_real());
-            } else if (account == "eosio.token" && name == "issue") {
-                auto data = trace["act"].get_object()["data"].get_object();
-                resobj.set("string_param1", data["to"]);
-                resobj.set("string_param2", data["memo"]);
-                auto quantity = data["quantity"].as<asset>();
-                resobj.set("string_param3", quantity.symbol_name());
-                resobj.set("number_param1", quantity.to_real());
-            } else if (account == "eosio" && name == "setcode") {
-                auto data = trace["act"].get_object()["data"].get_object();
-                resobj.set("string_param1", data["account"]);
-            } else if (account == "eosio" && name == "setabi") {
-                auto data = trace["act"].get_object()["data"].get_object();
-                resobj.set("string_param1", data["account"]);
-            } else if (account == "eosio" && name == "newaccount") {
-                auto data = trace["act"].get_object()["data"].get_object();
-                resobj.set("string_param1", data["creator"]);
-                resobj.set("string_param2", data["name"]);
-            } else if (account == "eosio" && name == "sellram") {
-                auto data = trace["act"].get_object()["data"].get_object();
-                resobj.set("string_param1", data["account"]);
-                resobj.set("number_param1", data["bytes"]);
-            } else if (account == "eosio" && name == "buyram") {
-                auto data = trace["act"].get_object()["data"].get_object();
-                resobj.set("string_param1", data["payer"]);
-                resobj.set("string_param2", data["receiver"]);
-                auto quant = data["quant"].as<asset>();
-                resobj.set("string_param3", quant.symbol_name());
-                resobj.set("number_param1", quant.to_real());
-            } else if (account == "eosio" && name == "delegatebw") {
-                auto data = trace["act"].get_object()["data"].get_object();
-                resobj.set("string_param1", data["from"]);
-                resobj.set("string_param2", data["receiver"]);
-                auto net_quantity = data["stake_net_quantity"].as<asset>();
-                resobj.set("number_param1", net_quantity.to_real());
-                auto cpu_quantity = data["stake_cpu_quantity"].as<asset>();
-                resobj.set("number_param2", cpu_quantity.to_real());
-            } else if (account == "eosio" && name == "undelegatebw") {
-                auto data = trace["act"].get_object()["data"].get_object();
-                resobj.set("string_param1", data["from"]);
-                resobj.set("string_param2", data["receiver"]);
-                auto net_quantity = data["unstake_net_quantity"].as<asset>();
-                resobj.set("number_param1", net_quantity.to_real());
-                auto cpu_quantity = data["unstake_cpu_quantity"].as<asset>();
-                resobj.set("number_param2", cpu_quantity.to_real());
-            } else if (account == "eosio" && name == "delegated_bandwidth") {
-                auto data = trace["act"].get_object()["data"].get_object();
-                resobj.set("string_param1", data["from"]);
-                resobj.set("string_param2", data["to"]);
-                auto net_quantity = data["net_weight"].as<asset>();
-                resobj.set("number_param1", net_quantity.to_real());
-                auto cpu_quantity = data["cpu_weight"].as<asset>();
-                resobj.set("number_param2", cpu_quantity.to_real());
-            } else {
-                continue;
+            if (trace["act"].get_object()["authorization"].is_array()) {
+                auto authorization = trace["act"].get_object()["authorization"].get_array();
+                if (!authorization.empty()) {
+                    resobj.set("first_actor", authorization[0].get_object()["actor"]);
+                }
             }
             string key = build_action_key(trace);
             resobj.set("primary_key", key);
-
-            if (trace.find("block_time") != trace.end()) {
-                string block_time = obj["block_time"].as<string>();
-                size_t replace_pos = block_time.find("-");
-                while (replace_pos != string::npos) {
-                    block_time.replace(replace_pos, 1, "");
-                    replace_pos = block_time.find("-");
-                }
-                size_t pos = block_time.find('T');
-                if (pos != string::npos && pos > 2) {
-                    if (block_time.length() > pos) {
-                        block_time = block_time.substr(0, pos);
-                        resobj.set("table_suffix", block_time);
-                    }
-                }
-            }
             res.push_back({key, resobj});
         }
         return res;
@@ -289,13 +223,14 @@ struct BosBank : type<BosBank> {
         table_suffix = block_time.substr(0, pos - 2);
         //遍历action_trace筛选符合条件的action_trace
         key_values res;
-        vector<string> accounts = {"btc.bos" "eth.bos" "usdt.bos"};
+        vector<string> accounts = {"btc.bos", "eth.bos", "usdt.bos"};
         vector<string> names = {"deposit", "withdraw", "transfer"};
         for (auto var : action_traces_vector) {
             auto trace = var.get_object();
             string account = string(trace["act"].get_object()["account"].as<account_name>());
             string name = string(trace["act"].get_object()["name"].as<account_name>());
-            if (contains(accounts, account) && contains(names, name)) {
+            string receiver = string(trace["receipt"].get_object()["receiver"].as<account_name>());
+            if (receiver == account && contains(accounts, account) && contains(names, name)) {
                 auto data = trace["act"].get_object()["data"].get_object();
                 fc::optional<string> from, to, memo;
                 fc::optional<asset>  quantity;
@@ -399,7 +334,8 @@ struct Uid : type<Uid> {
             auto trace = var.get_object();
             string account = string(trace["act"].get_object()["account"].as<account_name>());
             string name = string(trace["act"].get_object()["name"].as<account_name>());
-            if (account == "uid" && name == "charge") {
+            string receiver = string(trace["receipt"].get_object()["receiver"].as<account_name>());
+            if (receiver == account && account == "uid" && name == "charge") {
                 auto data = trace["act"].get_object()["data"].get_object();
                 fc::optional<string> username, contract, memo;
                 fc::optional<asset> quantity;
@@ -493,7 +429,8 @@ struct Transfer : type<Transfer> {
             auto trace = var.get_object();
             string account = string(trace["act"].get_object()["account"].as<account_name>());
             string name = string(trace["act"].get_object()["name"].as<account_name>());
-            if (account == "eosio.token" && name == "transfer") {
+            string receiver = string(trace["receipt"].get_object()["receiver"].as<account_name>());
+            if (receiver == account && account == "eosio.token" && name == "transfer") {
                 auto data = trace["act"].get_object()["data"].get_object();
                 fc::optional<string> from, to, memo;
                 fc::optional<asset> quantity;
@@ -544,5 +481,104 @@ struct Transfer : type<Transfer> {
 };
 static auto _transfer = types().register_type<Transfer>();
 
+struct Ibc : type<Ibc> {
+    key_values build(const transaction_trace_ptr& ttp, const fc::mutable_variant_object& obj) {
+        //从transaction中获取所有的action_trace
+        vector<fc::variant> action_traces_vector;
+        if (obj.find("action_traces") != obj.end()) {
+            queue<fc::variant> todo_action_traces;
+            for (auto trace : obj["action_traces"].get_array()) {
+                fc::mutable_variant_object traceobj(trace);
+                traceobj.set("index_in_transaction", static_cast<uint32_t>(action_traces_vector.size()));
+                traceobj.set("parent_global_sequence", -1);
+                action_traces_vector.push_back(traceobj);
+                if (!trace.get_object()["inline_traces"].get_array().empty())
+                    todo_action_traces.push(trace);
+            }
+            while (!todo_action_traces.empty()) {
+                auto trace = todo_action_traces.front();
+                todo_action_traces.pop();
+                for (auto itrace : trace.get_object()["inline_traces"].get_array()) {
+                    fc::mutable_variant_object traceobj(itrace);
+                    traceobj.set("index_in_transaction", static_cast<uint32_t>(action_traces_vector.size()));
+                    traceobj.set("parent_global_sequence", trace.get_object()["receipt"].get_object()["global_sequence"]);
+                    action_traces_vector.push_back(traceobj);
+                    if (!itrace.get_object()["inline_traces"].get_array().empty())
+                        todo_action_traces.push(itrace);
+                }
+            }
+        }
+        //基本信息
+        auto block_time = obj["block_time"].as<string>();
+        auto block_num  = ttp->block_num;
+        auto trx_id = string(ttp->id);
+        //计算分表策略
+        fc::optional<string> table_suffix;
+        size_t replace_pos = block_time.find("-");
+        while (replace_pos != string::npos) {
+            block_time.replace(replace_pos, 1, "");
+            replace_pos = block_time.find("-");
+        }
+        size_t pos = block_time.find('T');
+        table_suffix = block_time.substr(0, pos - 2);
+        //遍历action_trace筛选符合条件的action_trace
+        key_values res;
+        vector<string> accounts = {"bosibc.io", "eosio.token"};
+        vector<string> names = {"transfer"};
+        for (auto var : action_traces_vector) {
+            auto trace = var.get_object();
+            string account = string(trace["act"].get_object()["account"].as<account_name>());
+            string name = string(trace["act"].get_object()["name"].as<account_name>());
+            string receiver = string(trace["receipt"].get_object()["receiver"].as<account_name>());
+            if (receiver == account && contains(accounts, account) && contains(names, name)) {
+                auto data = trace["act"].get_object()["data"].get_object();
+                fc::optional<string> from, to, memo;
+                fc::optional<asset>  quantity;
+                if (data.find("from") != data.end()) {
+                    from = data["from"].as<string>();
+                }
+                if (data.find("to") != data.end()) {
+                    to = data["to"].as<string>();
+                }
+                if (data.find("memo") != data.end()) {
+                    memo = data["memo"].as<string>();
+                }
+                if (data.find("quantity") != data.end()) {
+                    quantity = data["quantity"].as<asset>();
+                }
+                auto resobj= fc::mutable_variant_object
+                    ("transaction_id", trx_id)
+                    ("block_time", obj["block_time"])
+                    ("block_num",  block_num)
+                    ("table_suffix", table_suffix)
+                    ("account", account)
+                    ("name", name)
+                    ("data", fc::json::to_string(data, fc::json::legacy_generator))
+                ;
+                if (from) {
+                    resobj.set("from", from);
+                }
+                if (to) {
+                    resobj.set("to", to);
+                }
+                if (*from != "bosibc.io" && *to != "bosibc.io") {
+                    continue;
+                }
+                if (quantity) {
+                    resobj.set("amount", quantity->to_real());
+                    resobj.set("symbol", quantity->symbol_name());
+                }
+                if (memo) {
+                    resobj.set("memo", memo);
+                }
+                string key = build_action_key(trace);
+                resobj.set("primary_key", key);
+                res.push_back({key, resobj});
+            }
+        }
+        return res;
+    }
+};
+static auto _ibc = types().register_type<Ibc>();
  
 }}} //eosio::data::es
